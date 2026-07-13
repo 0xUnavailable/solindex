@@ -1,0 +1,10 @@
+LICENSE
+README.md
+pyproject.toml
+src/solindex/__init__.py
+src/solindex/cli.py
+src/solindex.egg-info/PKG-INFO
+src/solindex.egg-info/SOURCES.txt
+src/solindex.egg-info/dependency_links.txt
+src/solindex.egg-info/entry_points.txt
+src/solindex.egg-info/top_level.txt

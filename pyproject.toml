@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solindex"
+version = "1.0.0"
+description = "Enumerate every function capable of writing a given Solidity storage variable."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "solindex" }
+]
+keywords = ["solidity", "static-analysis", "smart-contracts", "security"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# No third-party dependencies - pure standard library.
+dependencies = []
+
+[project.scripts]
+solindex = "solindex.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
