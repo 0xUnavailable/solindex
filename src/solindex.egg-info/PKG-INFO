@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: solindex
-Version: 1.0.0
+Version: 1.1.0
 Summary: Enumerate every function capable of writing a given Solidity storage variable.
 Author: solindex
 License: MIT
@@ -14,496 +14,347 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 Dynamic: license-file
 
-# solindex — Runtime State Indexer
-
-`solindex` answers exactly one question about a Solidity codebase:
-
-> **Which functions can write to this storage variable?**
-
-It's a mechanical index, not a security analyzer. It does not reconstruct
-execution, build call graphs, or infer anything about protocol behavior. It
-just finds, for a given `<Contract>.<variable>`, every function whose body
-(or whose modifiers) contains a statement that writes that variable — and
-lists them.
-
-```
-$ solindex contracts/ Vault.sol balance
-
-State Variable
-Vault.balance
-────────────────────────────
-W(balance)
-├── deposit()
-├── mint()
-└── liquidate()
-────────────────────────────
-function deposit(uint256 amount) external {
-    balance += amount;
-}
-────────────────────────────
-function mint(uint256 amount) external onlyMinter {
-    balance += amount * 2;
-}
-────────────────────────────
-function liquidate(address user) external {
-    balance -= 100;
-}
-```
-
-By default `solindex` prints both the writer tree **and** the full source
-of every writer function, verbatim (comments and original formatting
-included). If a write only happens through a modifier applied to the
-function (not in the function's own body), the modifier's implementation
-is shown too, clearly labeled.
-
----
-
-## Installation (pipx)
-
-`solindex` is a single pure-Python package with **no third-party
-dependencies**, so it installs cleanly with [pipx](https://pipx.pypa.io/).
-
-### 1. Get the files
-
-Unzip the package you downloaded:
-
-```bash
-unzip solindex.zip -d solindex
-cd solindex
-```
-
-You should see this layout:
-
-```
-solindex/
-├── pyproject.toml
-├── README.md
-├── LICENSE
-└── src/
-    └── solindex/
-        ├── __init__.py
-        └── cli.py
-```
-
-### 2. Install it globally with pipx
-
-From inside the `solindex/` directory (the one containing `pyproject.toml`):
-
-```bash
-pipx install .
-```
-
-That's it. Pipx builds the package, drops it into its own isolated venv, and
-symlinks the `solindex` command onto your `PATH`.
-
-Verify it worked:
-
-```bash
-solindex --help
-```
-
-If `pipx` isn't installed yet:
-
-```bash
-python3 -m pip install --user pipx
-python3 -m pipx ensurepath
-# open a new shell, then retry `pipx install .`
-```
-
-### Upgrading
-
-If you edit the source and want to reinstall:
-
-```bash
-pipx install . --force
-```
-
-### Uninstalling
-
-```bash
-pipx uninstall solindex
-```
-
-### Alternative: no pipx, just run it directly
-
-You don't strictly need pipx or installation at all — `src/solindex/cli.py`
-is a self-contained script with zero dependencies:
-
-```bash
-python3 src/solindex/cli.py contracts/ ActivePool.sol collBalance
-```
-
-But `pipx install .` is the recommended route since it gives you a plain
-`solindex` command from any directory.
-
----
-
-## Usage
-
-```
-solindex <project_root> <contract> <variable> [--locations]
-```
-
-| Argument        | Meaning                                                                 |
-|-----------------|--------------------------------------------------------------------------|
-| `project_root`  | Root directory to search for `.sol` files (e.g. `contracts/`)           |
-| `contract`      | Owning contract — see "specifying the contract" below                  |
-| `variable`      | The storage variable name to index                                      |
-| `--locations`   | Also print `file:line` under each writer in the tree                    |
-| `--no-impl`     | Print only the `W(...)` tree, skip full function source (on by default) |
-| `-o, --output PATH` | Write the result to a file instead of the terminal                  |
-| `--md`          | Shorthand: write Markdown straight to `<Contract>.<variable>.md` (no `-o` needed) |
-| `--markdown`    | Force Markdown output (headings + fenced code blocks)                   |
-| `--text`        | Force plain-text output, even if writing to a `.md` file                |
-
-### Writing to a file (Markdown or plain text)
-
-The simplest way to get a Markdown file — no path to type, no `-o`:
-
-```bash
-solindex contracts/ Vault.sol balance --md
-# -> writes Vault.balance.md in the current directory
-```
-
-Other ways to control the output:
-
-```bash
-# Auto-detects Markdown from the .md extension
-solindex contracts/ Vault.sol balance -o writers.md
-
-# --md with your own filename
-solindex contracts/ Vault.sol balance --md -o writers.md
-
-# Force Markdown even without a .md extension
-solindex contracts/ Vault.sol balance --markdown -o writers.txt
-
-# Print Markdown straight to the terminal (e.g. to pipe elsewhere)
-solindex contracts/ Vault.sol balance --markdown
-
-# Write plain text even to a .md path
-solindex contracts/ Vault.sol balance --text -o notes.md
-```
-
-A Markdown file looks like this:
-
-````markdown
-# State Variable: `Vault.balance`
-
-## W(balance)
-
-```
-├── deposit()
-├── mint()
-└── liquidate()
-```
-
-## Writer Implementations
-
-### `deposit()`
-
-```solidity
-function deposit(uint256 amount) external { balance += amount; }
-```
-
-### `mint()`
-
-```solidity
-function mint(uint256 amount) external { balance += amount * 2; }
-```
-````
-
-
-
-### Specifying `<contract>`
-
-`<contract>` can be any of:
-
-- **A `.sol` filename**, searched for under `project_root`:
-  `ActivePool.sol`
-- **A bare contract/library name**, searched for under `project_root`:
-  `ActivePool`
-- **An explicit path** to a `.sol` file, relative to your cwd or the
-  project root: `contracts/pools/ActivePool.sol`
-
-The contract argument is **mandatory** — state variable names aren't
-globally unique across a codebase, so `solindex` never guesses. If you omit
-it (pass only 2 positional args), you get an explicit "ambiguous query"
-error instead of a silent wrong answer:
-
-```
-$ solindex contracts/ collBalance
-Error
-
-State variable is ambiguous.
-
-Please specify the owning contract.
-
-Example
-
-solindex contracts/ <ContractName>.sol collBalance
-```
-
-### Examples
-
-```bash
-# By filename
-solindex contracts/ ActivePool.sol collBalance
-
-# By bare contract name
-solindex contracts/ ActivePool collBalance
-
-# By explicit path
-solindex contracts/pools/ActivePool.sol collBalance
-
-# Include file:line for every writer
-solindex contracts/ ActivePool.sol collBalance --locations
-```
-
-Sample output with `--locations` (implementations omitted here for
-brevity — they're still printed below the tree by default):
-
-```
-State Variable
-ActivePool.collBalance
-────────────────────────
-W(collBalance)
-├── increaseColl()
-│   contracts/pools/ActivePool.sol:142
-├── decreaseColl()
-│   contracts/pools/ActivePool.sol:158
-└── sendColl()
-    contracts/pools/ActivePool.sol:171
-────────────────────────
-function increaseColl(...) { ... }
-────────────────────────
-function decreaseColl(...) { ... }
-────────────────────────
-function sendColl(...) { ... }
-```
-
-Add `--no-impl` if you only want the tree (e.g. for scripting/grepping):
-
-```
-State Variable
-ActivePool.collBalance
-────────────────────────
-W(collBalance)
-├── increaseColl()
-├── decreaseColl()
-└── sendColl()
-```
-
-If no function writes the variable, you'll see:
-
-```
-State Variable
-ActivePool.collBalance
-────────────────────────
-W(collBalance)
-
-(no writers found)
-```
-
-### When a write only happens through a modifier
-
-If a function's own body never touches the variable but a modifier
-applied to it does, `solindex` still lists the function as a writer (since
-calling it does cause the write) and shows both the function and the
-modifier, clearly labeled:
-
-```
-function charge(uint256 amount) external onlyGated {
-    emit Charged(amount);
-}
-
-// write occurs in modifier 'onlyGated':
-modifier onlyGated() {
-    collected += 1;
-    _;
-}
-```
-
----
-
-## What counts as a "writer"
-
-A function (including `constructor`, `fallback`, and `receive`) is a writer
-if its body — **or a modifier applied to it** — contains any of:
-
-- Direct assignment: `x = value;`
-- Compound assignment: `x += value;`, `x -= value;`, etc.
-- Increment/decrement: `x++;`, `--x;`
-- Mapping / nested-mapping writes through the above
-- Struct member writes through the above
-- `delete x;`
-- `x.push(...)` / `x.pop()`
-- Any of the above reached through a local `storage` reference (alias)
-  that ultimately resolves back to the queried variable, e.g.:
-
-  ```solidity
-  Position storage p = positions[user];
-  p.debt = newDebt;   // counted as a write to `positions`
-  ```
-
-`x` is resolved down to its base identifier through any chain of
-struct-field access, array indexing, or mapping-key access, and through
-alias resolution, before being compared to the queried variable name.
-
-`solindex` inspects **statements**, not conditions — a `require(x == 1)` or
-an `if (x > 0)` never counts as a write, since a condition can't perform a
-storage write in Solidity. Every reachable statement (inside `if`/`else`,
-`for`, `while`, `do...while`, `unchecked { }`, and bare `{ }` blocks) is
-walked, including `for`-loop init/increment clauses.
-
-Inheritance is resolved for **same-file** base contracts only: state
-variables and functions/modifiers are collected recursively through `is`
-clauses declared in the same `.sol` file, in declaration order, with
-subclass functions correctly shadowing (overriding) base functions of the
-same name.
-
----
-
-## What `solindex` deliberately does NOT do
-
-This is a narrow, mechanically-checkable index — not a semantic or security
-analysis tool. `solindex` never:
-
-- Reconstructs execution or builds execution traces
-- Builds call graphs (internal or external)
-- Builds semantic/dataflow graphs
-- Infers protocol behavior, invariants, guarantees, or security properties
-- Infers exploitability or ranks/prioritizes findings
-- Performs vulnerability analysis of any kind
-
-If a potential write can't be resolved with certainty, it is **not**
-reported. Deterministic correctness is prioritized over completeness — a
-smaller, trustworthy list beats a longer, guessed one.
-
-## Known limitations
-
-These are documented, deliberate simplifications rather than bugs:
-
-1. **Single-file inheritance only.** Base contracts must be declared in the
-   same `.sol` file. Cross-file `import`-based inheritance is out of scope.
-2. **Storage aliases must use a single bare-identifier type.** A
-   declaration like `Position storage p = positions[id];` is recognized;
-   `mapping(address => uint) storage m2 = m1;` is not, because the type
-   token isn't a single identifier.
-3. **Modifiers and functions are scanned independently.** A storage alias
-   declared inside a modifier is not visible when scanning the function
-   body it guards, and vice versa — each is analyzed as its own isolated
-   scope.
-4. **No cross-function tracking.** If function `A()` calls internal
-   function `B()`, and `B()` writes the variable, `A()` is not itself
-   listed as a writer — only `B()` is (this is intentional: `solindex`
-   indexes direct writers, not everything reachable through the call
-   graph — that's the kind of reasoning explicitly out of scope).
-5. **String/comment-safe, but not full parser.** `solindex` uses
-   layout-preserving comment/string masking plus balanced-brace/paren
-   scanning rather than a full Solidity grammar/AST parser. This is robust
-   against the vast majority of real-world code but is not a formal
-   guarantee for arbitrarily adversarial formatting.
-
-If precision matters for a specific finding, always confirm by reading the
-listed function (use `--locations` to jump straight to it).
+# solindex
+
+**A deterministic, non-LLM static analysis tool for Solidity.**
+
+solindex answers questions about a Solidity codebase the way a compiler pass
+would, not the way a language model would: no inference, no summarization,
+no probabilistic guessing. Every answer is either derived mechanically from
+the source text, or explicitly marked as unresolved. Given the same
+codebase, solindex produces the same output, every time.
+
+It does four things:
+
+| Mode | Question it answers |
+|---|---|
+| **Writer-index** *(default)* | "Every function that can write to this state variable — where are they?" |
+| `--extract` | "Give me the exact source of these functions." |
+| `--trace` | "Walk this function's body and tell me every state read, state write, call, event, and branch, in order." |
+| `--closure` | "Starting from this function, give me everything: full call graph, every function's source, and every state variable's writers — recursively, until there's nothing left to expand." |
+
+Nothing in solindex parses Solidity into an AST. It works directly on
+source text — comment/string-stripped, brace-matched, statement-classified
+— which keeps it fast, dependency-free, and fully auditable: every rule it
+follows is legible in the code that implements it.
 
 ---
 
 ## Requirements
 
 - Python 3.8+
-- No third-party dependencies (standard library only)
+- No third-party dependencies. Standard library only.
+
+## Installation
+
+```bash
+# Just the script - no packaging step
+cp cli.py solindex
+chmod +x solindex
+./solindex --help
+```
+
+or invoke it directly with `python3 cli.py ...` as shown throughout this
+document.
 
 ---
 
-## Using solindex on Android (Termux)
-
-There's no Play-Store app for this — you run it the same way you would on
-any Linux box, inside [Termux](https://termux.dev/), a real terminal + Linux
-environment for Android. Get Termux from **F-Droid** or Termux's GitHub
-releases page (the old Play Store build is outdated/broken — don't use it).
-
-### 1. Install Python and unzip in Termux
-
-Open Termux and run:
+## Quick start
 
 ```bash
-pkg update && pkg upgrade
-pkg install python unzip -y
+# Who writes ActivePool.collBalance, anywhere in the project?
+solindex ./contracts ActivePool collBalance
+
+# Give me the exact source of these two functions
+solindex ./contracts --extract Vault.deposit ActivePool.mintAggInterest
+
+# Walk BorrowerOperations.closeTrove() statement by statement
+solindex . --trace BorrowerOperations.closeTrove
+
+# Give me EVERYTHING closeTrove touches, transitively
+solindex . --closure BorrowerOperations.closeTrove
 ```
 
-### 2. Get `solindex.zip` onto your phone
+`<project_root>` is scanned recursively — every `.sol` file under it, in
+every subdirectory, is indexed in one pass. There's no need to flatten a
+nested repo into a single folder; nested import structures resolve exactly
+as Solidity itself would resolve them.
 
-Any of these work:
-- Download it in your phone's browser (lands in `Downloads`)
-- AirDrop/share it from your computer via a cloud drive, or
-- `pkg install git` and `git clone` a repo you've pushed it to
+---
 
-### 3. Let Termux see your phone's storage (only needed if the zip landed in Downloads, not inside Termux itself)
+## Concepts
+
+Two things solindex resolves before answering anything:
+
+**Contract identity.** A contract/interface/library is identified by name,
+project-wide. If the same name is declared in two different files, solindex
+doesn't error immediately — indexing always succeeds. The error only fires
+if you actually ask a question that requires resolving that specific name,
+at which point solindex lists every file that declares it and asks you to
+disambiguate (pass a full path instead of a bare name).
+
+**Inheritance.** Base contracts are resolved across files, not just within
+the same file as the contract that inherits them. A state variable declared
+in `Base.sol` and written from `SubA.sol` and `SubB.sol` is discovered
+correctly regardless of which file you start from.
+
+---
+
+## Mode 1: Writer-index *(default)*
+
+```
+solindex <project_root> <contract> <variable> [options]
+```
+
+`<contract>` accepts a bare contract name (searched project-wide), a
+filename (`ActivePool.sol`), or a path. Passing only two arguments
+(`<project_root> <variable>`) deliberately triggers the ambiguous-query
+error, showing you the exact three-argument form to use.
 
 ```bash
-termux-setup-storage      # one-time; grants Termux access to shared storage, tap "Allow"
-cd ~/storage/downloads
+$ solindex contracts Vault collBalance
+State Variable
+Vault.collBalance
+────────────────────────────
+W(collBalance)
+├── deposit()
+└── _settle()
+────────────────────────────
+function deposit(uint256 amount) external onlyOwner {
+        require(amount > 0, "bad amount");
+        collBalance += amount;
+        ...
+        _settle();
+    }
+────────────────────────────
+function _settle() internal {
+        collBalance = collBalance;
+    }
 ```
 
-### 4. Unzip and install
+Options:
+
+| Flag | Effect |
+|---|---|
+| `--no-impl` | Print only the `W(...)` tree — skip full source of each writer |
+| `--locations` | Add a `file:line` under each writer |
+| `--md` | Write Markdown straight to `<Contract>.<variable>.md` |
+| `--markdown` | Force Markdown formatting to stdout or `-o` |
+| `-o PATH` | Write to a file (Markdown auto-detected from `.md` extension) |
 
 ```bash
-unzip solindex.zip -d ~/solindex
-cd ~/solindex
-
-pip install .
+$ solindex contracts Vault collBalance --no-impl
+State Variable
+Vault.collBalance
+────────────────────────────
+W(collBalance)
+├── deposit()
+└── _settle()
 ```
 
-(`pipx` works in Termux too if you prefer it — `pip install pipx && pipx install .`
-— but since `solindex` has zero dependencies, a plain `pip install .` is
-simpler and avoids pipx's extra isolated-venv step.)
+---
 
-### 5. Run it
+## Mode 2: `--extract`
+
+Pull one or more functions verbatim, by `Contract.functionName`, into a
+Markdown document. Independent of writer-indexing — doesn't require a
+variable at all.
 
 ```bash
-solindex --help
+solindex contracts --extract Vault.deposit ActivePool.mintAggInterest -o funcs.md
 ```
 
-If `solindex: command not found`, your Termux `pip` installed to a user
-bin directory not yet on `PATH` — fix with:
+Writes `# Extracted Functions`, one `## Contract.function` section per
+spec, each with its source file and a fenced Solidity code block. Defaults
+to `extracted_functions.md` if `-o` is omitted.
+
+---
+
+## Mode 3: `--trace`
+
+```
+solindex <project_root> --trace Contract.function [-o out.json]
+```
+
+Walks one function's body top to bottom and emits an ordered JSON array of
+**TraceNodes** — every state read, state write, call, event, branch, and
+return, in source order. This is the mechanical core the other modes are
+built on.
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+$ solindex contracts --trace Vault.deposit
+{
+  "contract": "Vault",
+  "function": "deposit",
+  "trace": [
+    { "type": "REQUIRE", "condition": "amount > 0", "conditionReads": [] },
+    { "type": "W", "target": "Vault.collBalance" },
+    { "type": "X", "target": "ActivePool.mintAggInterest" },
+    {
+      "type": "IF",
+      "condition": "collBalance > 100",
+      "conditionReads": [{ "type": "R", "target": "Vault.collBalance" }],
+      "children": [
+        { "type": "EMIT", "event": "Deposited" },
+        { "type": "ELSE", "children": [{ "type": "W", "target": "Vault.collBalance" }] }
+      ]
+    },
+    {
+      "type": "LOOP",
+      "condition": "for",
+      "children": [{ "type": "W", "target": "Vault.collBalance" }]
+    },
+    { "type": "I", "target": "Vault._settle" },
+    { "type": "RETURN", "value": null }
+  ]
+}
 ```
 
-### 6. Getting a Solidity project onto your phone to analyze
+### TraceNode reference
 
-- **From GitHub:** `pkg install git`, then `git clone <repo-url>`
-- **From your computer:** put the project folder in Downloads / a synced
-  cloud folder, then `cd ~/storage/downloads/<project>` from Termux
+Every node has a `type`. Fields are always present for that type — a
+missing signal is `null`/`[]`, never an omitted key.
 
-### 7. Writing output as Markdown you can actually read on-screen
+| Type | Fields | Meaning |
+|---|---|---|
+| `R` | `target` | A read of state variable `"Contract.varName"` (fully qualified by its *declaring* contract, resolved through inheritance). |
+| `W` | `target` | A write to a state variable, same qualification. |
+| `I` | `target` | An **internal**/private call — `"Contract.function"`. |
+| `X` | `target` | An **external**/public call, including all `instanceVar.f()` and `this.f()` calls (Solidity dispatches these externally regardless of the callee's own declared visibility). |
+| `L` | `target` | A call into a `library`. |
+| `UNRESOLVED_CALL` | `receiver`, `kind` | A low-level `.call`/`.delegatecall`/`.staticcall` — deliberately never resolved to a target, since the destination is dynamic. |
+| `EMIT` | `event` | An event emission. Arguments are not scanned. |
+| `REQUIRE` | `condition`, `conditionReads` | A `require`/`assert` guard. `conditionReads` is the `R` nodes found inside the condition, nested here (never as external siblings). |
+| `IF` | `condition`, `conditionReads`, `children` | A branch. `children` includes a trailing `ELSE` node when one exists. |
+| `ELSE` | `children` | The else-branch of the preceding `IF`. |
+| `LOOP` | `condition`, `children` | A `for`/`while` loop. `condition` is always the literal keyword (`"for"`/`"while"`) — the loop header's own test/init/increment clauses are not scanned for reads; only the loop **body** is walked. |
+| `RETURN` | `value` | The raw return expression text, or `null` for a bare `return;`. **Not** scanned for embedded reads/calls — if you need to know what a returned value depends on, look at the reads/writes earlier in the same trace. Every function trace ends with a `RETURN` node — synthesized if the function doesn't already end in an explicit one. |
 
-The terminal is small on a phone, so this is where `--md`/`-o` earns its
-keep — write a Markdown file and open it in any Markdown viewer app (or
-Termux's own `termux-open`). Chain the write and the open with `&&` so
-it's one command instead of two:
+Call resolution (`I`/`X`/`L`) follows the real Solidity dispatch rules:
+cross-file inheritance, interface-to-implementation resolution (`IFoo` →
+concrete `Foo`), direct library-qualified calls (`Math.max(...)`), and
+struct-field-typed receivers (`vars.pool.foo()`, resolved through the
+struct's real declared field type, not a name-matching guess). When a
+receiver genuinely can't be resolved, the node still exists — with a
+transparent literal target — rather than being dropped.
+
+---
+
+## Mode 4: `--closure`
+
+```
+solindex <project_root> --closure Contract.function [-o investigation_package.json]
+```
+
+This is `--trace`, recursively. Starting from one root function, it:
+
+1. Traces the root.
+2. Expands every `I`/`X`/`L` target it finds into its own full trace —
+   transitively, following the real call graph, not just one level deep.
+3. For every `R` (read) it finds anywhere in that closure, looks up every
+   function project-wide that can write that variable — cross-file,
+   inheritance-aware — and expands **each writer** into its own full trace
+   too, exactly like a call target. `W` (write) nodes are not
+   cross-referenced: a write is an effect, not an input to execution.
+4. Repeats until nothing new is left to expand.
+
+Cycle-safe: mutual/indirect recursion terminates cleanly, and any
+`Contract.function` is expanded exactly once no matter how many paths lead
+to it. Defaults to writing `investigation_package.json` in the current
+directory (override with `-o`).
 
 ```bash
-solindex contracts/ Vault.sol balance -o ~/storage/downloads/writers.md && termux-open ~/storage/downloads/writers.md
+$ solindex contracts --closure Vault.deposit
+Wrote investigation package for Vault.deposit to investigation_package.json
 ```
 
-That saves the file straight to your phone's Downloads folder and opens it
-in whatever app you have set to handle `.md` files (e.g. Markor, Obsidian,
-or your browser). If you find yourself doing this often, save yourself the
-typing with a one-time shell function:
+### Investigation package schema
+
+This schema is **frozen** — every `--closure` run produces exactly this
+shape, regardless of the function or codebase, so downstream tooling can
+parse it without special-casing.
+
+```
+{
+  "metadata": { "contract": "<root contract name>" },
+  "rootFunction": "Contract.function",
+
+  "functions": {
+    "Contract.function": {
+      "id": "Contract.function",
+      "trace": [ ...TraceNode... ] | null,
+      "implementation": {
+        "language": "solidity",
+        "source": "<verbatim function source>" | null
+      }
+    },
+    ...
+  },
+
+  "stateVariables": {
+    "Contract.varName": {
+      "id": "Contract.varName",
+      "writers": ["Contract.function", ...] | null
+    },
+    ...
+  }
+}
+```
+
+Navigation rules — this is what "recursive" means in practice:
+
+1. Opening a function always shows its **trace** and **implementation**
+   together (`functions[id]`).
+2. An `R(Contract.varName)` node anywhere in a trace points to
+   `stateVariables["Contract.varName"]`.
+3. Each entry in that variable's `writers` array is itself a key into
+   `functions` — a full Function Document, not a stub.
+4. Every `I`/`X`/`L` node's `target` is likewise a key into `functions`.
+5. Repeat until a target has no corresponding entry (a truly external
+   function — outside the indexed project — represented as
+   `{"trace": null, "implementation": {"source": null}}`, never silently
+   omitted) or you've reached a leaf with no further calls or reads.
 
 ```bash
-echo 'solopen() { solindex "$@" -o ~/storage/downloads/writers.md && termux-open ~/storage/downloads/writers.md; }' >> ~/.bashrc
-source ~/.bashrc
+$ python3 -c "
+import json
+pkg = json.load(open('investigation_package.json'))
+fn = pkg['functions'][pkg['rootFunction']]
+print(fn['implementation']['source'])
+for node in fn['trace']:
+    if node['type'] == 'R':
+        print('reads', node['target'], '- writers:',
+              pkg['stateVariables'][node['target']]['writers'])
+"
 ```
 
-Then it's just:
+---
 
-```bash
-solopen contracts/ Vault.sol balance
-```
+## Design notes
 
+- **No AST.** solindex operates on comment/string-masked source text with
+  brace/paren matching and statement classification. This is a deliberate
+  tradeoff: it means solindex has zero dependencies and its behavior is
+  fully readable in its own source, at the cost of not handling every
+  syntactic corner of Solidity (see below).
+- **Never guess, never silently drop.** Where a call target or a read
+  can't be resolved with certainty, solindex still emits a node — with an
+  explicit, literal, honestly-unresolved target — rather than fabricating
+  a plausible-looking answer or omitting the signal entirely.
+- **Ambiguity is lazy.** Indexing a project with colliding contract names
+  never fails on its own; it only fails when you ask a question whose
+  answer depends on the colliding name, and at that point you get every
+  candidate file listed so you can disambiguate.
 
+### Known limitations
+
+- Receiver chains through parenthesized expressions
+  (`address(this).call(...)`, `arr[i].foo()`) aren't walked — the chain
+  resolver handles plain `identifier.identifier.identifier(...)` chains,
+  including struct-field types, but breaks at a bracket or nested call.
+- `RETURN` values and loop headers (`for`/`while`) are not scanned for
+  embedded state reads — see the TraceNode table above. If a function's
+  *only* reference to a variable is inside a bare `return expr;` or a loop
+  header, that reference won't appear as an `R` node.
+- Overloaded functions resolve to the first implemented (bodied) match;
+  the JSON schema carries a single `target` string, not a candidate list.
